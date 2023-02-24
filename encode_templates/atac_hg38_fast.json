@@ -1,0 +1,15 @@
+{
+    "atac.pipeline_type" : "atac",
+    "atac.genome_tsv" : "/bar/cfan/genomes/hg38/encode-atac/hg38.tsv",
+
+
+    "atac.auto_detect_adapter" : true,
+    "atac.enable_tss_enrich" : true,
+    "atac.enable_xcor": true,
+    "atac.enable_count_signal_track": false,
+
+
+    "atac.align_cpu": 3,
+    "atac.call_peak_cpu": 3
+
+}

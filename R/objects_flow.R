@@ -45,7 +45,7 @@ flowjo.colnames <- function(file, write = F, out.file = NULL) {
   invisible(x)
 }
 
-flowjo.table.read.m <- function(files) {
+flowjo.table.read.m <- function(files, rename.dup = F) {
   # files: for example the tables from stain 1/2/3
   # metadata: tsv files; the "sample" column must be present. could also be a df
   dfs <- lapply(files, function(file) {
@@ -57,10 +57,10 @@ flowjo.table.read.m <- function(files) {
     
     gates <- df[1, -1] %>% unlist()
     df <- df[-1, ]
-    gates <- strsplit(gates, "subset")
+    gates <- strsplit(gates, "subset| \\| ")
     gates <- lapply(gates, function(x) {
-      if (grepl("/Q\\d", x[length(x)])) {
-        x <- x[length(x)] %>% stringr::str_extract(pattern = ": .+[\\+\\-] , .+[\\+\\-]") %>% 
+      if (grepl("/Q\\d", x[length(x) - 1])) {
+        x <- x[length(x)-1] %>% stringr::str_extract(pattern = ": .+[\\+\\-] , .+[\\+\\-]") %>% 
           gsub(" +", "", .) %>% gsub("[:,]", "", .)
         return(x)
       } else {
@@ -76,10 +76,11 @@ flowjo.table.read.m <- function(files) {
   gates <- lapply(dfs, function(df) return(colnames(df)[-1])) %>% unlist()
   dups <- gates %>% .[duplicated(gates)]
   if (length(dups) > 0) {
-    stop(paste0("duplicated gate names found: ", 
-                paste0(unique(dups), collapse = ", ")))
+    if (!rename.dup) {
+      stop(paste0("duplicated gate names found: ", 
+                  paste0(unique(dups), collapse = ", ")))
+    }
   }
-  
-  df <- Reduce(full_join, dfs)
+  df <- Reduce(function(x, y) left_join(x, y, by = "sample"), dfs)
   return(df)
 }

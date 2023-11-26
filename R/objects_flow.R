@@ -45,7 +45,7 @@ flowjo.colnames <- function(file, write = F, out.file = NULL) {
   invisible(x)
 }
 
-flowjo.table.read.m <- function(files, rename.dup = F) {
+flowjo.table.read.m <- function(files, rename.dup = F, sampleName.regex.fun = NULL) {
   # files: for example the tables from stain 1/2/3
   # metadata: tsv files; the "sample" column must be present. could also be a df
   dfs <- lapply(files, function(file) {
@@ -57,7 +57,7 @@ flowjo.table.read.m <- function(files, rename.dup = F) {
     
     gates <- df[1, -1] %>% unlist()
     df <- df[-1, ]
-    gates <- strsplit(gates, "subset| \\| ")
+    gates <- strsplit(gates, "(subset)*/| \\| ")
     gates <- lapply(gates, function(x) {
       if (grepl("/Q\\d", x[length(x) - 1])) {
         x <- x[length(x)-1] %>% stringr::str_extract(pattern = ": .+[\\+\\-] , .+[\\+\\-]") %>% 
@@ -70,9 +70,15 @@ flowjo.table.read.m <- function(files, rename.dup = F) {
       sub("^/", "", .) %>% gsub(" +", "", .)
     colnames(df) <- c("sample", gates)
     df$sample <- df$sample %>% sub("Panel\\d+_", "", .)
-    df[,2:length(df)] <- df[, 2:length(df)] %>% lapply(as.numeric)
+    
+    if (!is.null(sampleName.regex.fun)) {
+      df$sample <- sampleName.regex.fun(df$sample)
+    }
+    
+    df[,2:length(df)] <- df[, 2:length(df), drop = F] %>% lapply(as.numeric)
     return(df)
   })
+
   gates <- lapply(dfs, function(df) return(colnames(df)[-1])) %>% unlist()
   dups <- gates %>% .[duplicated(gates)]
   if (length(dups) > 0) {

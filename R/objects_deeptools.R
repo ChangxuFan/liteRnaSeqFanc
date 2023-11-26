@@ -6,10 +6,14 @@ deeptools.refpoint <- function (bw.vec, regions.vec, blacklist = NULL,
   # copied from scFanc::deeptools.refpoint. 
   if (!is.null(names(bw.vec))) {
     sample.labels <- names(bw.vec)
+  } else {
+    sample.labels <- basename(bw.vec) %>% 
+      sub("\\.bw$|\\.bigwig$|\\.bigWig$|\\.BigWig$", "", .)
   }
-  else {
-    sample.labels <- basename(bw.vec) %>% sub("\\.bw$|\\.bigwig$|\\.bigWig$|\\.BigWig$", 
-                                              "", .)
+  if (!is.null(names(regions.vec))) {
+    region.labels <- names(regions.vec)
+  } else {
+    region.labels <- basename(regions.vec) %>% sub(".bed|.narrowPeak", "", .)
   }
   if (length(color.map) != 1) {
     if (length(color.map) != length(bw.vec)) {
@@ -45,7 +49,8 @@ deeptools.refpoint <- function (bw.vec, regions.vec, blacklist = NULL,
   if (plot.heatmap == T) {
     cmd <- paste0(plotHeatmap, " -m ", mat, " -out ", heatmap, 
                   " --outFileNameMatrix ", mat_hm, " --outFileSortedRegions ", 
-                  sorted_bed, " --colorMap ", color.map, " --refPointLabel center")
+                  sorted_bed, " --colorMap ", color.map, " --refPointLabel center",
+                  " --regionsLabel ", region.labels)
     if (!is.null(sort.using.samples)) {
       cmd <- paste0(cmd, " --sortUsingSamples ", sort.using.samples)
     }

@@ -224,3 +224,94 @@ nanopore.death <- function(seqsum, read.type.df, pore.id.col = "pore_id",
   p <- scFanc::wrap.plots.fanc(pl, plot.out = plot.out, sub.width = length(blocks.plot))
   invisible(p)
 }
+
+nanopore.as.cov.cmp <- function(samples, bws, AS.list, out.file) {
+  # samples: just sample names.
+  # bws: bamCoverage results for each file
+  # AS.list: a list of granges. corresponding to the adaptive sampling regions 
+  # of each sample
+  if (!is.list(AS.list)) {
+    stop("!is.list(AS.list)")
+  }
+  
+  if (length(samples) != length(bws)) {
+    stop("length(samples) != length(bws)")
+  }
+  
+  if (length(samples) != length(AS.list)) {
+    stop("length(samples) != length(bws)")
+  }
+  
+  df <- lapply(1:length(samples), function(i) {
+    sample <- samples[i]
+    bw <- bws[i]
+    AS <- AS.list[[i]]
+    
+    bwgr <- rtracklayer::import(bw)
+    gr.on <- subsetByOverlaps(bwgr, AS)
+    gr.off <- subsetByOverlaps(bwgr, AS, invert = TRUE)
+    
+    cov.genome <- round(sum((width(bwgr) * bwgr$score))/sum(width(bwgr)), digits = 1)
+    cov.on <-  round(sum((width(gr.on) * gr.on$score))/sum(width(gr.on)), digits = 1)
+    cov.off <-  round(sum((width(gr.off) * gr.off$score))/sum(width(gr.off)), digits = 1)
+    
+    stats <- data.frame(sample = sample, cov.target = cov.on, cov.genome = cov.genome,
+                        cov.offtarget = cov.off)
+    return(stats)
+    
+  }) %>% do.call(rbind, .)
+  write.table(df, out.file, sep = "\t", quote = F, row.names = F, col.names = T)
+  return(df)
+}
+
+nanopore.minimap2.mapq.distro <- function(bam, plot.out) {
+  ga <- GenomicAlignments::readGAlignments(bam, param=ScanBamParam(what = c("qname", "mapq")))
+  df <- data.frame(qname = mcols(ga)$qname, mapq = mcols(ga)$mapq)
+  p <- ggplot(df, aes(x = mapq)) +
+    geom_density()
+  scFanc::wrap.plots.fanc(list(p), plot.out = plot.out)
+  stats <- data.frame(mapq60 = sum(df$mapq >= 60), others = sum(df$mapq < 60))
+  stats.out <- tools::file_path_sans_ext(plot.out) %>% paste0(".txt")
+  write.table(stats, stats.out, sep = "\t", row.names = F, col.names =T, quote = F)
+  invisible(p)
+}
+
+nanopore.minimap2.AS.distro <- function(samples, bams, which = NULL,
+                                        use.indel.count = F, indel.frac.cap = 0.1, plot.out) {
+  if (length(samples) != length(bams)) {
+    stop("length(samples) != length(bams)")
+  }
+  
+  df <- lapply(1:length(samples), function(i) {
+    sample <- samples[i]
+    bam <- bams[i]
+    
+    ga <- GenomicAlignments::readGAlignments(
+      bam, param=ScanBamParam(what = c("qname", "mapq", "flag"), tag = "AS", which = which))
+    
+    # remove multimapping reads and supplemmentary alignments
+    ga <- ga[mcols(ga)$mapq == 60 & 
+               !bamFlagTest(mcols(ga)$flag, "isSecondaryAlignment") &
+               !bamFlagTest(mcols(ga)$flag, "isSupplementaryAlignment")]
+    
+    if (use.indel.count) {
+      cigar.table <- GenomicAlignments::cigarOpTable(cigar(ga))
+      nIndel <- cigar.table[, "I"] + cigar.table[, "D"]
+      fIndel <- nIndel/qwidth(ga)
+      fIndel[fIndel > indel.frac.cap] <- indel.frac.cap
+      df <- data.frame(sample = sample, fIndel = fIndel)
+    } else {
+      df <- data.frame(sample = sample, AS = mcols(ga)$AS, 
+                       qwidth = qwidth(ga), qname = mcols(ga)$qname)
+      df$nAS <- df$AS/df$qwidth 
+      # nAS: normalized AS. this is introduced in my read rescue pipeline
+    }
+    return(df)
+  }) %>% do.call(rbind, .)
+  x <- ifelse(use.indel.count, "fIndel", "nAS")
+  p <- ggplot(df, aes_string(x = x, fill = "sample", color = "sample")) +
+    geom_density(alpha = 0.3) + 
+    theme(aspect.ratio = 1)
+  scFanc::wrap.plots.fanc(list(p), plot.out = plot.out)
+  return()
+}

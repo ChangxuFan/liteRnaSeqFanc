@@ -152,9 +152,6 @@ xy.plot.grid <- function(mat, plot.out = NULL, transformation = NULL, ...) {
 quadrant.mat <- function(exp.df, comp.df, cutoff, bLog2p1 = F,
                          out.file = NULL, plot = T) {
   exp.df <- exp.df %>% as.data.frame()
-  if (bLog2p1) {
-    exp.df <- log2(exp.df + 1)
-  }
   if (! "gene" %in% colnames(exp.df)) {
     exp.df$gene <- rownames(exp.df)
   }
@@ -163,6 +160,10 @@ quadrant.mat <- function(exp.df, comp.df, cutoff, bLog2p1 = F,
       x <- comp$x
       y <- comp$y
       df <- exp.df[, c("gene", x, y)]
+      if (bLog2p1) {
+        df[, x] <- log2(df[, x] + 1)
+        df[, y] <- log2(df[, y] + 1)
+      }
       
       df$x <- "l"
       df$x[df[, x] > cutoff] <- "h"

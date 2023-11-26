@@ -76,7 +76,6 @@ bam.promoter.pct <- function(bams, genomes, genome = NULL, mode = "ChIPseeker",
     gr <- suppressWarnings(GenomicAlignments::readGAlignments(bam.s) %>% GRanges())
     seqlengths(gr) <- NA
     strand(gr) <- "*"
-    browser()
     if (tolower(mode) == "chipseeker") {
       gr <- utilsFanc::gr.fast.annot(gr, genome, use.klraps = F, anno.cols = "annotation")
       n.pro.1k <- sum(gr$annotation == "Promoter (<=1kb)")

@@ -212,3 +212,164 @@ motif.name.format <- function(x) {
   res <- x %>% gsub("[^A-Za-z0-9]", "_", .)
   return(res)
 }
+
+
+#################
+# form a signal-motif matrix. This is the same as the output of the computeMatrix function
+# of deeptools. Just imagine each region is a motif, centered and extended up and downstream x bp.
+# note this is stranded: for motif instances on the negative strand, the value is flipped.
+# this function was never finished because it's hard to compute the matrix
+# motif.pileup.mat.gen <- function(bw.vec, motif.bed, peaks.gr, ext = 500, stranded = T,
+#                                  threads = 1) {
+#   stop("this function doesn't work. Use motif.pileup.archr(), which uses the ArchR code for this purpose")
+#   # motif.bed: pre-scanned motifs across the genome. 
+#   motif.gr <- rtracklayer::import(motif.bed)
+#   if ("*" %in% strand(motif.gr) && stranded) {
+#     stop("motif instances must be stranded")
+#   }
+#   
+#   motif.gr <- motif.gr %>% subsetByOverlaps(peaks.gr, ignore.strand = T)
+#   if (length(motif.gr) < 1) {
+#     stop("length(motif.gr) < 1")
+#   }
+#   
+#   motif.gr <- GenomicRanges::resize(motif.gr, width = ext, fix = "center")
+#   
+#   not.found <- bw.vec[!file.exists(bw.vec)]
+#   if (length(not.found) > 0) {
+#     stop(paste0("some bw files are not found: \n", 
+#                 paste0(not.found, collapse = "\n")))
+#   }
+#   
+#   if (is.null(names(bw.vec))) {
+#     names(bw.vec) <- basename(bw.vec) %>% tools::file_path_sans_ext()
+#   }
+#   if (any(duplicated(names(bw.vec)))) {
+#     stop("some of the elements in names(bw.vec) is duplicated")
+#   }
+#   
+#   utilsFanc::safelapply(names(bw.vec), function(bw.name) {
+#     browser()
+#     bw <- bw.vec[bw.name]
+#     bw <- rtracklayer::import(bw)
+#     mat <- EnrichedHeatmap::normalizeToMatrix(
+#       bw, motif.gr[1:3], extend = 0, w = 1, value_column =  "score", background = 0, 
+#       mean_mode = "w0", smooth = F, 
+#       keep = c(0, 1),
+#       include_target = T, target_ratio = 1)
+#   })
+#   
+# }
+
+
+motif.pileup.archr <- function(rle.vec, motif.beds, peaks.gr, ext = 500,
+                               norm.facs = NULL, out.Rds = NULL,
+                               threads.motif = 1, threads.sample = 1) {
+  # motif.bed: pre-scanned motifs across the genome. 
+  # rle: refer to ~/others/etv2/fast_check/step1.0.3_cutsite_bw_gen...R
+  if (is.null(names(motif.beds))) {
+    names(motif.beds) <- basename(motif.beds) %>% tools::file_path_sans_ext()
+  }
+  if (is.null(names(rle.vec))) {
+    names(rle.vec) <- basename(rle.vec) %>% tools::file_path_sans_ext()
+  }
+  
+  if (!is.null(norm.facs)) {
+    if (!identical(names(norm.facs), names(rle.vec))) {
+      stop("!identical(names(norm.facs), names(rle.vec))")
+    }
+  }
+  
+  dfs <- utilsFanc::safelapply(motif.beds, function(motif.bed) {
+    motif.gr <- rtracklayer::import(motif.bed)
+    if ("*" %in% strand(motif.gr)) {
+      warning("motif instances must be stranded")
+      return()
+    }
+    
+    motif.gr <- motif.gr %>% subsetByOverlaps(peaks.gr, ignore.strand = T)
+    if (length(motif.gr) < 1) {
+      warning("length(motif.gr) < 1")
+      return()
+    }
+    
+    motif.gr <- GenomicRanges::resize(motif.gr, width = 1, fix = "center")
+    # motif.gr <- motif.gr[motif.gr$score >= 9]
+    motif.grl <- split(motif.gr, seqnames(motif.gr))
+    
+    df <- utilsFanc::safelapply(names(rle.vec), function(rle.name) {
+      rle <- rle.vec[rle.name]
+      rle <- readRDS(rle)
+      intSeq <- intersect(names(rle), names(motif.grl))
+      if (length(intSeq) < 1) {
+        stop("No overlapping chromosomes between rle and motif")
+      }
+      outx <- ArchR::rleSumsStranded(rle[intSeq], motif.grl[intSeq], 
+                              ext, as.integer)
+      if (!is.null(norm.facs)) {
+        outx <- round(outx/norm.facs[rle.name], digits = 3)
+      }
+      return(outx)
+    }, threads = threads.sample) %>% as.data.frame()
+    colnames(df) <- names(rle.vec)
+    return(df)
+  }, threads = threads.motif)
+  names(dfs) <- names(motif.beds)
+  # dfs.melt <- lapply(dfs, function(df) {
+  #   df.melt <- df %>% mutate(pos = 1:nrow(df)) %>% 
+  #     reshape2::melt(id.vars = "pos", variable.name = "sample", value.name = "y")
+  # })
+  if (!is.null(out.Rds)) {
+    dir.create(dirname(out.Rds), showWarnings = F, recursive = T)
+    saveRDS(dfs, out.Rds)
+  }
+  return(dfs)
+}
+
+motif.pileup.plot <- function(dfs, smoothWindow = 3, 
+                              coldata, group.by, out.dir, root.name = NULL) {
+  # this takes in the result of motif.pileup.archr.
+  # a list of dfs. for each df: each column is a sample, each row 1:n is position 1:n
+  # coldata is used to combine different replicates together 
+  required.cols <- c("sample", group.by)
+  utilsFanc::check.intersect(required.cols, "required columns", 
+                             colnames(coldata), "colnames(coldata)")
+  coldata <- coldata[, c("sample", group.by)]
+  colnames(coldata) <- c("sample", "grb")
+  
+  if (is.null(root.name)) root.name <- basename(out.dir)
+  
+  dfms <- lapply(names(dfs), function(motif) {
+    df <- dfs[[motif]]
+    utilsFanc::check.intersect(colnames(df), "colnames(df)", 
+                               coldata$sample, "coldata$sample")
+    
+    df <- lapply(df, utilsFanc::centerRollMean, smoothWindow) %>% as.data.frame()
+    half <- floor(nrow(df)/2)
+    pos <- c((-half):half)
+    if (length(pos) > nrow(df)) {
+      pos <- pos[2:length(pos)]
+    }
+    df$pos <- pos
+    # m: melt
+    dfm <- reshape2::melt(df, id.vars = "pos", variable.name = "sample", value.name = "y")
+    dfm <- dplyr::left_join(dfm, coldata, by = "sample")
+    dfm <- dfm %>% dplyr::group_by(pos, grb) %>% 
+      dplyr::summarise(mean = mean(y), sd = sd(y)) %>% 
+      dplyr::ungroup() %>% as.data.frame()
+    
+    p <- ggplot(dfm, aes(x = pos, y = mean)) +
+      geom_line(aes(group = grb, color = grb), alpha = 0.8) +
+      geom_ribbon(aes(y = mean, ymin = mean - sd, ymax = mean + sd, fill = grb),
+                  alpha = 0.5)
+    p <- p %>% utilsFanc::theme.fc.1(italic.x = F)
+    
+    dir.create(out.dir, showWarnings = F, recursive = T)
+    ggsave(paste0(out.dir, "/", root.name, "_", motif, ".pdf"), p, 
+           device = cairo_pdf, width = 2, height = 2, units = "in", dpi = 300)
+    return(dfm)
+  })
+  names(dfms) <- names(dfs)
+  saveRDS(dfms, paste0(out.dir, "/", root.name, "_dfms.Rds"))
+  return(dfms)
+}

@@ -179,3 +179,49 @@ deeptools.mat.norm <- function(mat.file, out.file = NULL, norm.to = 1000) {
   out.file <- deeptools.mat.write(se = se, assay = "norm", out.file = out.file)
   return(out.file)
 }
+
+
+deeptools.mat.renorm.plot <- function(mat.file, renorm.to = 1000, norm.after.aggr = T,
+                                      plot.out) {
+  # compared to deeptools.mat.read, this one handles the type of mat.file where there are multiple samples
+  title <- readLines(con = mat.file, n = 1)
+  df <- readr::read_table2(file = mat.file, comment = "@", 
+                           col_names = FALSE, col_types = readr::cols(
+                             X2 = readr::col_character(), X3 = readr::col_character())) %>% 
+    as.data.frame()
+  
+  mat <- df[, -(1:6)]
+  
+  json <- jsonlite::fromJSON(sub("^@", "", title))
+  
+  df <- lapply(1:length(json$group_labels), function(i) {
+    lapply(1:length(json$sample_labels), function(j) {
+      i.start <- json$group_boundaries[i] + 1
+      i.end <- json$group_boundaries[i+1]
+      j.start <- json$sample_boundaries[j] + 1
+      j.end <- json$sample_boundaries[j+1]
+      print(j.start)
+      print(j.end)
+      mat <- mat[i.start:i.end,j.start:j.end]
+      
+      if (norm.after.aggr) {
+        aggr <- colSums(mat)
+        if (is.null(renorm.to)) {
+          renorm.to <- sum(aggr)
+        }
+        aggr <- renorm.to * (aggr/sum(aggr))
+      } else {
+        stop("only norm.after.aggr has been developed")
+      }
+      df <- data.frame(group = json$group_labels[i], sample = json$sample_labels[j],
+                       values = aggr, position = 1:length(aggr))
+      return(df)
+    }) %>% do.call(rbind, .) %>% return()
+  }) %>% do.call(rbind, .)
+  
+  p <- ggplot(df, aes(x = position, y = values)) +
+    geom_line(aes(color = sample, group = sample)) + theme_bw() +
+    theme(aspect.ratio = 1)
+  scFanc::wrap.plots.fanc(list(p), plot.out = plot.out, sub.width = 7)
+  invisible(p)
+}

@@ -13,8 +13,9 @@ peak.merge <- function(peak.files, score.col = 9, th = 8,
   return(gr)
 }
 
-diffbind.2.raw.a2bl <- function(dbo = NULL, mat = NULL,
-                                sample.info, bam.col = "bamReads", sample.col = "SampleID", bSingleEnd, 
+diffbind.2.raw.a2bl <- function(dbo = NULL, mat = NULL, skip.deseq2 = F,
+                                sample.info, bam.col = "bamReads", sample.col = "SampleID", rename.sample.to = NULL,
+                                bSingleEnd, 
                                 features = NULL, feature.file.col,
                                 feature.file.filter.col, feature.file.filter.th,
                                 cluster.ident, clusters = NULL,
@@ -22,7 +23,7 @@ diffbind.2.raw.a2bl <- function(dbo = NULL, mat = NULL,
                                 filter.nz = F, filter.size = NULL, filter.samples = NULL,
                                 filter.fun = "max", sequential.filter,
                                 independentFiltering = T,
-                                quantile.norm = F, deseq2.norm.method = "ratio", 
+                                quantile.norm = F, deseq2.norm.method = "ratio", use.genewise.disperisons = F,
                                 deseq2.locfunc = NULL, norm.cr.genes = NULL,
                                 coldata.columns = NULL, coldata.df = NULL,
                                 pca.ntop = 10000, pca.groupings = NULL,
@@ -96,6 +97,13 @@ diffbind.2.raw.a2bl <- function(dbo = NULL, mat = NULL,
       a2b$root.name <- df[, cluster.ident][1]
       a2b$bulk.mat <- mat[, df[[sample.col]]]
       
+      if (!is.null(rename.sample.to)) {
+        utilsFanc::check.intersect(rename.sample.to, "rename.sample.to", colnames(df), "colnames(df)")
+        utilsFanc::check.dups(df[, rename.sample.to], rename.sample.to)
+        colnames(a2b$bulk.mat) <- df[, rename.sample.to]
+        df[, ]
+      }
+      
       if (!is.null(features)) {
         if (is.list(features)) {
           feature.use <- features[[cluster]]
@@ -105,11 +113,12 @@ diffbind.2.raw.a2bl <- function(dbo = NULL, mat = NULL,
         a2b$bulk.mat <- a2b$bulk.mat %>% .[rownames(.) %in% feature.use,]
       }
       
-      colnames(a2b$bulk.mat) <- colnames(a2b$bulk.mat) %>% sub(paste0(cluster, "_"), "", .)
+      # colnames(a2b$bulk.mat) <- colnames(a2b$bulk.mat) %>% sub(paste0(cluster, "_"), "", .)
       a2b$coldata <- df %>% dplyr::mutate(Sample = colnames(a2b$bulk.mat))
       rownames(a2b$coldata) <- colnames(a2b$bulk.mat)
-      
-      a2b <- s2b.deseq(s2b.obj = a2b, quantile.norm = quantile.norm,
+      if (skip.deseq2)
+        return(a2b)
+      a2b <- s2b.deseq(s2b.obj = a2b, quantile.norm = quantile.norm, use.genewise.disperisons = use.genewise.disperisons,
                        norm.method = deseq2.norm.method, locfunc = deseq2.locfunc, norm.cr.genes = norm.cr.genes,
                        filter.nz = filter.nz, filter.size = filter.size, filter.samples = filter.samples,
                        filter.fun = filter.fun, sequential.filter = sequential.filter,

@@ -116,8 +116,12 @@ diffbind.2.raw.a2bl <- function(dbo = NULL, mat = NULL, skip.deseq2 = F,
       # colnames(a2b$bulk.mat) <- colnames(a2b$bulk.mat) %>% sub(paste0(cluster, "_"), "", .)
       a2b$coldata <- df %>% dplyr::mutate(Sample = colnames(a2b$bulk.mat))
       rownames(a2b$coldata) <- colnames(a2b$bulk.mat)
-      if (skip.deseq2)
+      if (skip.deseq2) {
+        a2b$bulkNorm <- as.data.frame(qn.fanc(a2b$bulk.mat, T))
+        a2b$bulkNorm$gene <- rownames(a2b$bulkNorm)
         return(a2b)
+      }
+        
       a2b <- s2b.deseq(s2b.obj = a2b, quantile.norm = quantile.norm, use.genewise.disperisons = use.genewise.disperisons,
                        norm.method = deseq2.norm.method, locfunc = deseq2.locfunc, norm.cr.genes = norm.cr.genes,
                        filter.nz = filter.nz, filter.size = filter.size, filter.samples = filter.samples,

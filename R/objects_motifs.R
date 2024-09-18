@@ -361,9 +361,9 @@ motif.pileup.plot <- function(dfs, smoothWindow = 3,
     p <- ggplot(dfm, aes(x = pos, y = mean)) +
       geom_line(aes(group = grb, color = grb), alpha = 0.8) +
       geom_ribbon(aes(y = mean, ymin = mean - sd, ymax = mean + sd, fill = grb),
-                  alpha = 0.5)
+                  alpha = 0.5, show.legend = F)
     p <- p %>% utilsFanc::theme.fc.1(italic.x = F)
-    
+    p <- p + theme(plot.margin = unit(c(0.04, 0.2, 0.01, 0), units = "in"))
     dir.create(out.dir, showWarnings = F, recursive = T)
     ggsave(paste0(out.dir, "/", root.name, "_", motif, ".pdf"), p, 
            device = cairo_pdf, width = 2, height = 2, units = "in", dpi = 300)

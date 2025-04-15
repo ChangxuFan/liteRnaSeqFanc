@@ -18,7 +18,8 @@ homer.motif.enrich <- function(fg.bed, genome, outdir, bg.bed = NULL, simplify.b
     fg.bed.file <- fg.bed
   }
   
-  cmd <- paste0(find.motifs.path, " ", fg.bed.file, " ","/bar/cfan/genomes/",genome, "/", genome, ".fa", 
+  cmd <- paste0("export PATH=", homer.path, ":$PATH && ", 
+                find.motifs.path, " ", fg.bed.file, " ","~/genomes/",genome, "/", genome, ".fa", 
                 " ", outdir, " -size ", size, " -p ", thread)
   if (denovo == F) {
     cmd <- paste0(cmd, " -nomotif ")

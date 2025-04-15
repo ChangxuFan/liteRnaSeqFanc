@@ -179,3 +179,55 @@ bam.mean.coverage <- function(bam, bed) {
   return(cov.df)
 }
 
+bam.enrichment <- function(bams, bed, 
+                           genome, 
+                           threads = 1,
+                           out.dir, root = NULL) {
+  # enrich.mode:
+  ## genome: say all the peaks are 1MB in size. But the genome is 
+  ## 3GB in size. Then you can calculate enrichment in peaks using binomial distro
+  # example usage: 
+  # ~/St/Ly49/revision/revision3.3_Eomes/Eomes1.1_open_chromatin_enrichment_2023-12-26.R
+  # on RIS.
+  
+  if (is.null(root)) root <- basename(out.dir)
+  if (is.null(names(bams))) names(bams) <- sub(".bam$", "", basename(bams))
+  if (any(duplicated(names(bams)))) {
+    stop("any(duplicated(names(bams)))")
+  }
+  
+  gr <- utilsFanc::import.bed.fanc(bed, return.gr = T)
+  total.peak <- sum(width(gr))
+  strand(gr) <- "*"
+  
+  chrom.sizes <- read.table(paste0("~/genomes/", genome, "/", genome, ".fa.fai"), 
+                            sep = "\t")
+  genome.size <- sum(chrom.sizes$V2)
+  
+  frac.exp <- total.peak/genome.size
+  
+  stats <- utilsFanc::safelapply(names(bams), function(sample) {
+    bam <- bams[[sample]]
+    bam.gr <- suppressWarnings(GRanges(GenomicAlignments::readGAlignments(bam)))
+    n <- length(bam.gr)
+    n.in.peaks <- unique(queryHits(findOverlaps(bam.gr, gr, ignore.strand = T))) %>% length()
+    frac.in.peaks <- n.in.peaks/n
+    
+    stats <- data.frame(sample = sample, n = n, n.in.peaks = n.in.peaks,
+                        frac.in.peaks = round(frac.in.peaks, digits = 4),
+                        frac.exp = round(frac.exp, digits = 4),
+                        enrichment = round(frac.in.peaks/frac.exp, digits = 2),
+                        genome.size = genome.size, total.peak.size = total.peak)
+    return(stats)
+  }, threads = threads) %>% do.call(rbind, .)
+  
+  dir.create(out.dir, showWarnings = F, recursive = T)
+  write.table(stats, paste0(out.dir, "/", root, "_stats.tsv"), 
+              col.names = T, row.names = F, sep = "\t", quote = F)
+  
+  return(stats)
+}
+
+
+bam.gr <- suppressWarnings(GRanges(GenomicAlignments::readGAlignments("revision3.3_Eomes/bowtie2/fehniger_Eomes_rep1_mapq8_42.01.bam")))
+

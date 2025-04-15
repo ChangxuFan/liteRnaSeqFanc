@@ -246,7 +246,6 @@ nanopore.as.cov.cmp <- function(samples, bws, AS.list, out.file) {
     sample <- samples[i]
     bw <- bws[i]
     AS <- AS.list[[i]]
-    
     bwgr <- rtracklayer::import(bw)
     gr.on <- subsetByOverlaps(bwgr, AS)
     gr.off <- subsetByOverlaps(bwgr, AS, invert = TRUE)

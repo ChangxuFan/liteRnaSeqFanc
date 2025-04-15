@@ -1,5 +1,7 @@
 trust.count <- function(sample.info, work.dir, levels = c("gene", "subgroup", "allele" ),
-                        skip.deseq2 = F,
+                        single.cell.mode = F,
+                        use.consensus_count = T, only.use.groups = NULL,
+                        skip.deseq2 = F, TCR.mode = F, na.pct.threshold = 10,
                         # deseq2 arguments (mandatory)
                         design.formula, contrast, pca.groupings,
                         # deseq2 arguments (optional)
@@ -8,122 +10,177 @@ trust.count <- function(sample.info, work.dir, levels = c("gene", "subgroup", "a
                         filter.fun = "max", sequential.filter,
                         independentFiltering = F,
                         pca.ntop = 10000, 
-                        sample.order = NULL, single.sample = F,
-                        plot.dir = NULL) {
-  # by default, we separate by heavy vs light chains
-  if (is.null(plot.dir))
-    plot.dir <- paste0(work.dir, "/plots")
+                        sample.order = NULL, single.sample = F) {
+  # # by default, we separate by heavy vs light chains
+  # if (is.null(plot.dir))
+  #   plot.dir <- paste0(work.dir, "/plots")
+  # 
+  # if (is.character(sample.info)) {
+  #   sample.info <- read.table(sample.info, header = T)
+  # }
+  # fields <- c("sample", "airr")
+  # utilsFanc::check.intersect(x = fields, "required fields", 
+  #                            colnames(sample.info), "colnames(sample.info)")
+  # airr <- sample.info[, fields] %>% unique() %>% 
+  #   split(., f = 1:nrow(.)) %>% lapply(function(s) {
+  #     airr <- read.table(s$airr, header = T, sep = "\t") 
+  #     airr$sample <- s$sample
+  #     return(airr)
+  #   }) %>% do.call(rbind, .)
+  # 
+  # fields <- c("sequence_id", "sample", 
+  #             "v_call", "d_call", "j_call", "c_call", 
+  #             "consensus_count")
+  # utilsFanc::check.intersect(
+  #   fields, "mandatory columns",
+  #   colnames(airr), "colnames(airr)")
+  # 
+  # airr <- airr[, fields]
+  # airr$group <- NA
+  # call.cat <- paste0(airr$v_call, airr$d_call, airr$j_call, airr$c_call)
+  # if (TCR.mode) {
+  #   print("Counting T cell receptors")
+  #   stop("TCR mode not developed yet")
+  #   
+  # } else {
+  #   print("Counting B cell receptors")
+  #   airr$group[grepl("IGL|IGK", call.cat)] <- "IGLK"
+  #   airr$group[grepl("IGH", call.cat)] <- "IGH"
+  # }
+  # 
+  # 
+  # total.contigs <- nrow(airr)
+  # na.contigs <- sum(is.na(airr$group))
+  # na.pct <- round(100*na.contigs/total.contigs, digits = 2)
+  # na.thresh <- 1
+  # if (na.pct > na.thresh) {
+  #   stop(paste0("Too many NA's in airr$group. ", na.pct, "% of the contigs are NA. ", 
+  #               "This is higher than the threshold (", na.thresh, "%) set by Changxu Fan", 
+  #               "Maybe you are looking at TCRs somehow?"))
+  # }
+  # airr <- airr[!is.na(airr$group),]
   
-  if (is.character(sample.info)) {
-    sample.info <- read.table(sample.info, header = T)
+  airr <- trust.airr.read(sample.info = sample.info, TCR.mode = TCR.mode, 
+                          na.pct.threshold = na.pct.threshold)
+  
+  if (!is.null(only.use.groups)) {
+    airr <- airr %>% filter(group %in% only.use.groups)
+    if (nrow(airr) < 1) 
+      stop("nrow(airr) < 1")
   }
-  fields <- c("sample", "airr")
-  utilsFanc::check.intersect(x = fields, "required fields", 
-                             colnames(sample.info), "colnames(sample.info)")
-  airr <- sample.info[, fields] %>% unique() %>% 
-    split(., f = 1:nrow(.)) %>% lapply(function(s) {
-      airr <- read.table(s$airr, header = T, sep = "\t") 
-      airr$sample <- s$sample
-      return(airr)
-    }) %>% do.call(rbind, .)
   
-  fields <- c("sequence_id", "sample", 
-              "v_call", "d_call", "j_call", "c_call", 
-              "consensus_count")
-  utilsFanc::check.intersect(
-    fields, "mandatory columns",
-    colnames(airr), "colnames(airr)")
-  
-  airr <- airr[, fields]
-  airr$group <- NA
-  call.cat <- paste0(airr$v_call, airr$d_call, airr$j_call, airr$c_call)
-  airr$group[grepl("IGL|IGK", call.cat)] <- "IGLK"
-  airr$group[grepl("IGH", call.cat)] <- "IGH"
-  total.contigs <- nrow(airr)
-  na.contigs <- sum(is.na(airr$group))
-  na.pct <- round(100*na.contigs/total.contigs, digits = 2)
-  na.thresh <- 1
-  if (na.pct > na.thresh) {
-    stop(paste0("Too many NA's in airr$group. ", na.pct, "% of the contigs are NA. ", 
-                "This is higher than the threshold (", na.thresh, "%) set by Changxu Fan", 
-                "Maybe you are looking at TCRs somehow?"))
-  }
-  airr <- airr[!is.na(airr$group),]
-  
-  s2b.list <- lapply(c(T, F), function(use.consensus_count) {
-    s2b.list <- lapply(levels, function(level) {
-      s2b.list <- airr %>% split(., f = factor(.$group, levels = unique(.$group))) %>% 
-        lapply(function(df) {
-          group <- df$group[1]
-          if (level == "gene") {
-            segments <- c("v", "j", "c")
-          } else if (level ==  "subgroup") {
-            segments <- c("v")
-          } else if (level == "allele") {
-            segments <- c("v", "j")
+  s2b.list <- lapply(levels, function(level) {
+    s2b.list <- airr %>% split(., f = factor(.$group, levels = unique(.$group))) %>% 
+      lapply(function(df) {
+        
+        group <- df$group[1]
+        
+        if (level == "gene") {
+          segments <- c("v", "j", "c")
+        } else if (level ==  "subgroup") {
+          segments <- c("v")
+        } else if (level == "allele") {
+          segments <- c("v", "j")
+        } else {
+          stop(paste0("level ", level, " is not recognized. "))
+        }
+        if (group %in% c("IGH", "TRB")) {
+          segments <- c(segments, "d") %>% utilsFanc::sort.by(c("v", "d", "j", "c"))
+        }
+        
+        s2b.list <- lapply(segments, function(segment) {
+          call <- paste0(segment, "_call")
+          if (level == "allele") {
+            abbr <- "al"
+          } else if (level == "gene") {
+            abbr <- "gn"
+            df[, call] <- sub("\\*.+$", "", df[, call])
+          } else if (level == "subgroup") {
+            abbr <- "sg"
+            df[, call] <- gsub("\\-.+$", "", df[, call]) %>% gsub("\\*.+$", "", .)
           } else {
             stop(paste0("level ", level, " is not recognized. "))
           }
-          if (group == "IGH") {
-            segments <- c(segments, "d") %>% utilsFanc::sort.by(c("v", "d", "j", "c"))
-          }
           
-          s2b.list <- lapply(segments, function(segment) {
-            call <- paste0(segment, "_call")
-            if (level == "allele") {
-              abbr <- "al"
-            } else if (level == "gene") {
-              abbr <- "gn"
-              df[, call] <- sub("\\*.+$", "", df[, call])
-            } else if (level == "subgroup") {
-              abbr <- "sg"
-              df[, call] <- gsub("\\-.+$", "", df[, call]) %>% gsub("\\*.+$", "", .)
-            } else {
-              stop(paste0("level ", level, " is not recognized. "))
-            }
+          # if (single.cell.mode) {
+          #   # utilsFanc::check.intersect("cell_id", "cell_id", colnames(df), "colnames(df)")
+          #   # df$cell_id <- paste0(df$sample, "#", df$cell_id, "-1")
+          #   # utilsFanc::check.dups(df$cell_id, "df$cell_id")
+          #   # df <- df[df[, call] != "",]
+          #   # s2b <- list(
+          #   #   root.name = paste0(abbr, "_", group, "_", segment),
+          #   #   sc.mat = df[, c(call, "cell_id", "consensus_count")] %>% 
+          #   #     reshape2::acast(as.formula(paste0(call, " ~ cell_id")), value.var = "consensus_count"),
+          #   #   airr = df
+          #   # )
+          #   # s2b$sc.mat[is.na(s2b$sc.mat)]  <- 0
+          #   # return(s2b)
+          #   
+          # } else {
+          # }
+          df <- df %>% dplyr::group_by(!!as.name(call), sample)
+          
+          if (single.cell.mode) {
+            utilsFanc::check.intersect("cell_id", "cell_id", colnames(df), "colnames(df)")
+            df$cell_id <- paste0(df$sample, "#", df$cell_id, "-1")
+            utilsFanc::check.dups(df$cell_id, "df$cell_id")
+            df <- suppressMessages(dplyr::summarise(df, n = n()))
+            counting.flag <- "sc"
             
-            df <- df %>% dplyr::group_by(!!as.name(call), sample)
+          } else {
             if (use.consensus_count) {
               df <- suppressMessages(dplyr::summarise(df, n = sum(consensus_count)))
+              counting.flag <- "nR"
             } else {
               df <- suppressMessages(dplyr::summarise(df, n = n()))
+              counting.flag <- "nC"
             }
-            df <- df %>% dplyr::ungroup() %>% as.data.frame()
-            df <- df[!df[, call] %in% c(""),]
-            
-            df <- utilsFanc::change.name.fanc(df = df, cols.from = call, cols.to = "gene")
-            s2b <- list()
-            s2b$root.name <- paste0(ifelse(use.consensus_count, "nR", "nC"), "_", abbr,
-                                    "_", group, "_", segment)
-            s2b$bulk.mat <- df %>% reshape2::acast(gene ~ sample, value.var = "n")
-            s2b$bulk.mat[is.na(s2b$bulk.mat)] <- 0
-            s2b$coldata <- sample.info[, !colnames(sample.info) %in% c("airr")] %>% 
-              dplyr::filter(sample %in% colnames(s2b$bulk.mat))
-            rownames(s2b$coldata) <- s2b$coldata$sample
-            s2b$bulk.mat <- s2b$bulk.mat[, s2b$coldata$sample]
-            if (!skip.deseq2) {
-              s2b <- s2b.deseq(
-                s2b.obj = s2b, quantile.norm = quantile.norm,
-                norm.method = deseq2.norm.method, locfunc = deseq2.locfunc,
-                filter.nz = filter.nz, filter.size = filter.size, filter.samples = filter.samples,
-                filter.fun = filter.fun, sequential.filter = sequential.filter,
-                independentFiltering = independentFiltering,
-                pca.ntop = pca.ntop, pca.groupings = pca.groupings,
-                design = design.formula, contrast = contrast,
-                sample.order = sample.order, try.hm = F,
-                force.hm = F, force = F, 
-                plot.dir = plot.dir,
-                single.sample = single.sample
-              )
-            }
-            return(s2b)
-          })
-          return(s2b.list)
-        }) %>% Reduce(c, .)
-      return(s2b.list)
-    }) %>% Reduce(c, .)
+          }
+          df <- df %>% dplyr::ungroup() %>% as.data.frame()
+          df <- df[!df[, call] %in% c(""),]
+          
+          df <- utilsFanc::change.name.fanc(df = df, cols.from = call, cols.to = "gene")
+          s2b <- list()
+          s2b$root.name <- paste0(counting.flag, "_", abbr,
+                                  "_", group, "_", segment)
+          s2b$bulk.mat <- df %>% reshape2::acast(gene ~ sample, value.var = "n")
+          s2b$bulk.mat[is.na(s2b$bulk.mat)] <- 0
+          s2b$coldata <- sample.info[, !colnames(sample.info) %in% c("airr")] %>% 
+            dplyr::filter(sample %in% colnames(s2b$bulk.mat))
+          rownames(s2b$coldata) <- s2b$coldata$sample
+          s2b$bulk.mat <- s2b$bulk.mat[, s2b$coldata$sample]
+          if (!skip.deseq2) {
+            plot.dir <- paste0(work.dir, "/deseq2_assess/")
+            s2b <- s2b.deseq(
+              s2b.obj = s2b, quantile.norm = quantile.norm,
+              norm.method = deseq2.norm.method, locfunc = deseq2.locfunc,
+              filter.nz = filter.nz, filter.size = filter.size, filter.samples = filter.samples,
+              filter.fun = filter.fun, sequential.filter = sequential.filter,
+              independentFiltering = independentFiltering,
+              pca.ntop = pca.ntop, pca.groupings = pca.groupings,
+              design = design.formula, contrast = contrast,
+              sample.order = sample.order, try.hm = F,
+              force.hm = F, force = F, 
+              plot.dir = plot.dir,
+              single.sample = single.sample
+            )
+          } else {
+            genes <- rownames(s2b$bulk.mat )
+            s2b$bulkNorm <- s2b$bulk.mat %>% as.data.frame() %>%
+              lapply(function(x) return(x/sum(x))) %>% as.data.frame()
+            s2b$bulkNorm <- cbind(data.frame(gene = genes), s2b$bulkNorm)
+            colnames(s2b$bulkNorm) <- sub("^X", "", colnames(s2b$bulkNorm))
+            s2b$bulkNorm.mat <- s2b$bulkNorm[, -1] %>% as.matrix()
+            rownames(s2b$bulkNorm.mat) <- genes
+          }
+          
+          return(s2b)
+        })
+        return(s2b.list)
+      }) %>% Reduce(c, .)
     return(s2b.list)
   }) %>% Reduce(c, .)
+  
   names(s2b.list) <- lapply(s2b.list, function(s2b) return(s2b$root.name)) %>% unlist()
   dir.create(work.dir, recursive = T, showWarnings = F)
   saveRDS(s2b.list, paste0(work.dir, "/bulk.list.Rds"))
@@ -131,7 +188,7 @@ trust.count <- function(sample.info, work.dir, levels = c("gene", "subgroup", "a
 }
 
 
-trust.airr.read <- function(sample.info, file.out = NULL) {
+trust.airr.read <- function(sample.info, TCR.mode = F, na.pct.threshold = 10, file.out = NULL) {
   if (is.character(sample.info)) {
     sample.info <- read.table(sample.info, header = T)
   }
@@ -154,12 +211,21 @@ trust.airr.read <- function(sample.info, file.out = NULL) {
   # airr <- airr[, fields]
   airr$group <- NA
   call.cat <- paste0(airr$v_call, airr$d_call, airr$j_call, airr$c_call)
-  airr$group[grepl("IGL|IGK", call.cat)] <- "IGLK"
-  airr$group[grepl("IGH", call.cat)] <- "IGH"
+  
+  if (TCR.mode) {
+    print("Counting T cell receptors")
+    airr$group[grepl("TRB", call.cat)] <- "TRB"
+    airr$group[grepl("TRA", call.cat)] <- "TRA"
+  } else {
+    print("Counting B cell receptors")
+    airr$group[grepl("IGL|IGK", call.cat)] <- "IGLK"
+    airr$group[grepl("IGH", call.cat)] <- "IGH"
+  }
+  
   total.contigs <- nrow(airr)
   na.contigs <- sum(is.na(airr$group))
   na.pct <- round(100*na.contigs/total.contigs, digits = 2)
-  na.thresh <- 1
+  na.thresh <- na.pct.threshold
   if (na.pct > na.thresh) {
     stop(paste0("Too many NA's in airr$group. ", na.pct, "% of the contigs are NA. ", 
                 "This is higher than the threshold (", na.thresh, "%) set by Changxu Fan", 
@@ -173,7 +239,7 @@ trust.airr.read <- function(sample.info, file.out = NULL) {
   invisible(airr)
 }
 
-trust.junction.sum <- function(airr.cat, out.dir, root.name = NULL) {
+trust.junction.sum <- function(airr.cat, use.consensus_count = F, out.dir, root.name = NULL) {
   # airr.cat: catted airr files. generated using trust.airr.read()
   airr <- airr.cat
   rm(airr.cat)
@@ -181,10 +247,15 @@ trust.junction.sum <- function(airr.cat, out.dir, root.name = NULL) {
     root.name <- basename(out.dir)
   }
   
-  fields <- c("junction_aa", "sample")
+  fields <- c("junction_aa", "sample", "consensus_count")
   utilsFanc::check.intersect(fields, " required columns",
                              colnames(airr), "colnames(airr.cat)")
   airr <- airr[, fields]
+  
+  if (use.consensus_count) {
+    airr <- airr[rep(seq_along(airr$consensus_count), airr$consensus_count), ]
+  }
+  
   airr <- airr %>% dplyr::filter(junction_aa != "")
   sum.df <- airr %>% dplyr::group_by(sample) %>% 
     dplyr::summarise(n_distinct = length(unique(junction_aa)),
@@ -197,9 +268,12 @@ trust.junction.sum <- function(airr.cat, out.dir, root.name = NULL) {
               quote = F, col.names = T, row.names = F, sep = "\t")
   
   airr$length <- nchar(airr$junction_aa)
-  p <- ggplot(airr, aes(x = length, y = sample, color = sample, fill = sample)) +
-    ggridges::geom_density_ridges(alpha = 0.3) +
-    theme(aspect.ratio = 1)
+  
+  p <- ggplot(airr, aes(x = length, y = sample)) +
+    ggridges::geom_density_ridges(alpha = 0.3, show.legend = F, 
+                                  aes(color = sample, fill = sample)) +
+    theme(aspect.ratio = 1) +
+    scale_x_continuous(breaks = scales::breaks_pretty())
   
   scFanc::wrap.plots.fanc(list(p), plot.out = paste0(
     out.dir, "/", root.name, "_junctionAA_length_distro.png"))
@@ -271,7 +345,7 @@ trust.dist.aa.1 <- function(airr.cat, length.mercy = 2, n.subsample = 1000,
   invisible(p)
 }
 
-trust.kmer.umap <- function(sample.info, k = 3, residues = "AA", seed = 42, 
+trust.kmer.umap <- function(sample.info, TCR.mode = F, k = 3, residues = "AA", seed = 42, 
                             junction.length.min = NULL, junction.length.max = NULL,
                             out.dir, root.name = NULL) {
   if (is.null(root.name)) root.name <- basename(out.dir)
@@ -279,7 +353,7 @@ trust.kmer.umap <- function(sample.info, k = 3, residues = "AA", seed = 42,
   dir.create(out.dir, showWarnings = F, recursive = T)
   
   utilsFanc::t.stat("Reading in airr files")
-  airr <- trust.airr.read(sample.info = sample.info)
+  airr <- trust.airr.read(sample.info = sample.info, TCR.mode = TCR.mode)
   airr <- airr[airr$junction_aa != "",]
   if (!is.null(junction.length.min))
     airr <- airr[nchar(airr$junction_aa) >= junction.length.min,]
@@ -293,6 +367,7 @@ trust.kmer.umap <- function(sample.info, k = 3, residues = "AA", seed = 42,
   
   utilsFanc::t.stat("Generating Kmer matrix")
   kmat <- kmer::kcount(aa, k = k, residues = residues, compress = T)
+  
   kmat <- kmat[, colSums(kmat) > 0]
   rownames(kmat) <- airr$name
   saveRDS(kmat, paste0(out.dir, "/", file.name, "_kmat.Rds"))

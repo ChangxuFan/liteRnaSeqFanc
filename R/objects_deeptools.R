@@ -1,7 +1,11 @@
-deeptools.refpoint <- function (bw.vec, regions.vec, blacklist = NULL,
-                                upstream = 2000, downstream = 2000, norm.to = NULL,
+deeptools.refpoint <- function (bw.vec, regions.vec, blacklist = NULL, 
+                                upstream = 2000, downstream = 2000, norm.to = NULL, binSize = 10,
+                                missingDataAsZero = T, missingDataColor = 1, 
                                 color.map = "Reds", sort.using.samples = 1, compute.matrix = T, 
-                                plot.heatmap = T, threads, out.dir, root.name = NULL, computeMatrix = "/bar/cfan/anaconda2/envs/jupyter/bin/computeMatrix", 
+                                plot.heatmap = T, threads, out.dir, root.name = NULL, 
+                                other.params.computeMatrix = "",
+                                other.params.plotHeatmap = "",
+                                computeMatrix = "/bar/cfan/anaconda2/envs/jupyter/bin/computeMatrix", 
                                 plotHeatmap = "/bar/cfan/anaconda2/envs/jupyter/bin/plotHeatmap") {
   # copied from scFanc::deeptools.refpoint. 
   if (!is.null(names(bw.vec))) {
@@ -31,11 +35,14 @@ deeptools.refpoint <- function (bw.vec, regions.vec, blacklist = NULL,
   heatmap <- paste0(prefix, ".hm.pdf")
   if (compute.matrix == T) {
     cmd <- paste0(computeMatrix, " reference-point -S ", 
-                  paste0(bw.vec, collapse = " "), " -R ", paste0(regions.vec, 
-                                                                 collapse = " "), " -o ", mat, " --missingDataAsZero ", 
+                  paste0(bw.vec, collapse = " "), " -R ", paste0(regions.vec, collapse = " "),
+                  " -o ", mat, 
+                  ifelse(missingDataAsZero, " --missingDataAsZero ", ""), 
                   " -b ", downstream, " -a ", upstream, " --referencePoint center ", 
+                  " --binSize ", binSize,
                   " --samplesLabel ", paste0(sample.labels, collapse = " "), 
-                  " -p ", threads)
+                  " -p ", threads, 
+                  other.params.computeMatrix)
     if (!is.null(blacklist)) {
       cmd <- paste0(cmd, " -bl ", blacklist)
     }
@@ -50,7 +57,9 @@ deeptools.refpoint <- function (bw.vec, regions.vec, blacklist = NULL,
     cmd <- paste0(plotHeatmap, " -m ", mat, " -out ", heatmap, 
                   " --outFileNameMatrix ", mat_hm, " --outFileSortedRegions ", 
                   sorted_bed, " --colorMap ", color.map, " --refPointLabel center",
-                  " --regionsLabel ", region.labels)
+                  " --missingDataColor ", missingDataColor,
+                  " --regionsLabel ", paste0(region.labels, collapse = " "),
+                  paste0(other.params.plotHeatmap, collapse = " "))
     if (!is.null(sort.using.samples)) {
       cmd <- paste0(cmd, " --sortUsingSamples ", sort.using.samples)
     }
@@ -59,6 +68,80 @@ deeptools.refpoint <- function (bw.vec, regions.vec, blacklist = NULL,
   }
   return()
 }
+
+deeptools.scaleRegion <- function (bw.vec, regions.vec, blacklist = NULL, 
+                                upstream = 2000, downstream = 2000, norm.to = NULL, binSize = 10,
+                                missingDataAsZero = T, missingDataColor = 1, 
+                                color.map = "Reds", sort.using.samples = 1, compute.matrix = T, 
+                                plot.heatmap = T, threads, out.dir, root.name = NULL, 
+                                other.params.computeMatrix = "",
+                                other.params.plotHeatmap = "",
+                                computeMatrix = "/bar/cfan/anaconda2/envs/jupyter/bin/computeMatrix", 
+                                plotHeatmap = "/bar/cfan/anaconda2/envs/jupyter/bin/plotHeatmap") {
+  stop("just copied from deeptools.refpoint. Haven't finished modifying yet")
+  if (!is.null(names(bw.vec))) {
+    sample.labels <- names(bw.vec)
+  } else {
+    sample.labels <- basename(bw.vec) %>% 
+      sub("\\.bw$|\\.bigwig$|\\.bigWig$|\\.BigWig$", "", .)
+  }
+  if (!is.null(names(regions.vec))) {
+    region.labels <- names(regions.vec)
+  } else {
+    region.labels <- basename(regions.vec) %>% sub(".bed|.narrowPeak", "", .)
+  }
+  if (length(color.map) != 1) {
+    if (length(color.map) != length(bw.vec)) {
+      stop("length(color.map) != length(bw.vec)")
+    }
+  }
+  if (is.null(root.name)) {
+    root.name <- basename(out.dir)
+  }
+  dir.create(out.dir, showWarnings = F, recursive = T)
+  prefix <- paste0(out.dir, "/", root.name)
+  mat <- paste0(prefix, ".mat.gz")
+  mat_hm <- paste0(prefix, ".tsv.gz")
+  sorted_bed <- paste0(prefix, ".sorted.bed")
+  heatmap <- paste0(prefix, ".hm.pdf")
+  if (compute.matrix == T) {
+    cmd <- paste0(computeMatrix, " scale-regions -S ", 
+                  paste0(bw.vec, collapse = " "), " -R ", paste0(regions.vec, collapse = " "),
+                  " -o ", mat, 
+                  ifelse(missingDataAsZero, " --missingDataAsZero ", ""), 
+                  " -b ", downstream, " -a ", upstream, " --referencePoint center ", 
+                  " --binSize ", binSize,
+                  " --samplesLabel ", paste0(sample.labels, collapse = " "), 
+                  " -p ", threads, 
+                  other.params.computeMatrix)
+    if (!is.null(blacklist)) {
+      cmd <- paste0(cmd, " -bl ", blacklist)
+    }
+    print(cmd)
+    system(cmd)
+  }
+  
+  if (!is.null(norm.to)) {
+    mat <- deeptools.mat.norm(mat.file = mat, norm.to = norm.to)
+  }
+  if (plot.heatmap == T) {
+    cmd <- paste0(plotHeatmap, " -m ", mat, " -out ", heatmap, 
+                  " --outFileNameMatrix ", mat_hm, " --outFileSortedRegions ", 
+                  sorted_bed, " --colorMap ", color.map, " --refPointLabel center",
+                  " --missingDataColor ", missingDataColor,
+                  " --regionsLabel ", paste0(region.labels, collapse = " "),
+                  paste0(other.params.plotHeatmap, collapse = " "))
+    if (!is.null(sort.using.samples)) {
+      cmd <- paste0(cmd, " --sortUsingSamples ", sort.using.samples)
+    }
+    print(cmd)
+    system(cmd)
+  }
+  return()
+}
+
+
+
 
 deeptools.pileup.qc <- function(bw.vec, all.in.one = T, genome, plot.type = "TSS", 
                                 # if plot.type == "motif"
